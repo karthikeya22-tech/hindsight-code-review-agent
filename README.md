@@ -78,12 +78,20 @@ Each issue has **✓ Accept / ✕ Reject** (+ optional note). The decision text 
 
 ### 1. Hindsight
 
-Run a Hindsight server locally (Docker) or use Hindsight Cloud, then point the backend at it:
+Run a Hindsight server locally (Docker) or use Hindsight Cloud, then point the backend at it by creating **`backend/.env`** — this is the file the backend actually loads:
 
 ```bash
-cp .env.example .env
-# edit HINDSIGHT_BASE_URL (+ HINDSIGHT_API_KEY if your server needs it)
+cd backend
+# create backend/.env, then edit:
+#   HINDSIGHT_BASE_URL (+ HINDSIGHT_API_KEY if your server needs it)
 ```
+
+> **Where `.env` must live:** `backend/config.py` calls `find_dotenv()`, which walks
+> upward starting from `backend/` and stops at the **first** `.env` it finds. So the
+> backend always loads `backend/.env`. A `.env` at the repo root is **silently
+> ignored** while `backend/.env` exists — and if there are multiple project copies
+> in the tree, only the `.env` belonging to the copy whose backend you actually
+> start gets loaded (start the wrong copy → wrong keys → 401).
 
 Local server (see https://hindsight.vectorize.io/developer/installation for current instructions):
 
@@ -111,16 +119,29 @@ npm run dev   # http://localhost:5173 (proxies /api → :8000)
 
 ### Environment variables (`.env`)
 
-| Var | Purpose | Default |
+| Var | Purpose | Default (from `backend/config.py`) |
 |---|---|---|
-| `HINDSIGHT_BASE_URL` | Hindsight API URL | `http://localhost:8888` |
+| `HINDSIGHT_BASE_URL` | Hindsight API URL | `https://api.hindsight.vectorize.io` |
 | `HINDSIGHT_API_KEY` | Bearer token if required | _(empty)_ |
 | `HINDSIGHT_BANK_ID` | Memory bank | `codemind-team` |
 | `LLM_API_KEY` | OpenAI-compatible key; if empty, a labeled heuristic reviewer is used | _(empty)_ |
-| `LLM_BASE_URL` | LLM endpoint | `https://api.openai.com/v1` |
-| `LLM_MODEL` | Model name | `gpt-4o-mini` |
+| `LLM_BASE_URL` | LLM endpoint | `https://openrouter.ai/api/v1` |
+| `LLM_MODEL` | Model name | `cohere/north-mini-code:free` |
 
 Never commit real keys. No secrets exist in frontend code (verify: `grep -ri "api_key\|api-key" frontend/src` returns nothing).
+
+**LLM configuration rules (learned the hard way):**
+
+- `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` must all belong to the **same
+  provider**. A key from one provider against another provider's `LLM_BASE_URL`
+  fails with `401 AuthenticationError` on every review (e.g. a `gsk_…` Groq key
+  against `https://router.huggingface.co/v1`).
+- **Restart the backend after editing `.env`.** Settings are read once at import,
+  and `uvicorn --reload` only watches `.py` files — saving `.env` does nothing for
+  an already-running server, which makes provider switches look like "the problem
+  persists".
+- Verify quickly with `GET /api/health` → `llm_configured: true` before debugging
+  anything else.
 
 ## Demo flow (the money slide)
 
