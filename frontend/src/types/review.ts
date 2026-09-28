@@ -60,6 +60,10 @@ export interface HistoryEntry {
   language: string;
   findings: number;
   at: string;
+  code?: string;
+  review?: ReviewResponse;
 }
 
 export type Phase = 'idle' | 'recalling' | 'reviewing' | 'done';
+
+export type ActiveTab = 'workspace' | 'memories' | 'project' | 'history';

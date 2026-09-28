@@ -197,32 +197,59 @@ def generate_review(code: str, language: str, context: str | None, memories: lis
                     project_memories: list[MemoryUsed] | None = None,
                     team_memories: list[MemoryUsed] | None = None) -> tuple[dict, str]:
     """Returns (parsed_review_dict, provider_name). Raises on provider failure."""
+    settings.reload()
     if not llm_configured():
         return _fallback_review(code, language, memories, project, project_memories, team_memories), "heuristic-fallback"
 
     from openai import OpenAI
 
-    client = OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL or None)
+    base_url = (settings.LLM_BASE_URL or "").strip() or None
+    api_key = (settings.LLM_API_KEY or "").strip()
+    model = (settings.LLM_MODEL or "").strip()
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
     prompt = build_review_prompt(code, language, context, memories, project, project_memories, team_memories)
+
+    messages = [
+        {"role": "system", "content": "You are CodeMind, a code review agent. Return only valid JSON."},
+        {"role": "user", "content": prompt},
+    ]
+
     try:
-        resp = client.chat.completions.create(
-            model=settings.LLM_MODEL,
-            messages=[
-                {"role": "system", "content": "You are CodeMind, a code review agent. Return only valid JSON."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.3,
-            max_tokens=2000,
-        )
-        raw = resp.choices[0].message.content or "{}"
-        data = json.loads(raw)
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=2000,
+            )
+        except Exception as e_rf:
+            err_msg = str(e_rf).lower()
+            if "response_format" in err_msg or "json_object" in err_msg or "unsupported" in err_msg:
+                log.warning("Provider rejected response_format, retrying without response_format: %s", e_rf)
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=2000,
+                )
+            else:
+                raise e_rf
+
+        raw = (resp.choices[0].message.content or "{}").strip()
+        # Clean any markdown code blocks if the model wrapped the JSON output
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw)
+        cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+        data = json.loads(cleaned)
+
         # Never trust memory_based=true when there were no memories.
         if not memories and isinstance(data.get("issues"), list):
             for iss in data["issues"]:
                 iss["memory_based"] = False
                 iss["memory_reference"] = None
-        return data, settings.LLM_MODEL
+        return data, model
     except Exception as e:
-        log.exception("LLM review failed")
+        log.exception("LLM review failed against %s (model: %s)", base_url, model)
         raise RuntimeError(f"LLM review failed: {e}") from e
+
