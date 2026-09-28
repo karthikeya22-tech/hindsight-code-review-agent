@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+pydantic==2.9.2
+python-dotenv==1.0.1
+# HTTP client for the OpenAI-compatible chat API — used here to call Gemini
+# (LLM_BASE_URL), NOT an OpenAI account. Required by services/llm_service.py.
+openai==2.18.0
+hindsight-client==0.10.1
